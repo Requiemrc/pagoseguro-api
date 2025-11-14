@@ -78,7 +78,7 @@ app.get('/api/transactions', (req, res) => {
 
 app.post('/api/transactions/:id/action', (req, res) => {
   const { id } = req.params;
-  const { action } = req.body;
+  const { action, reason, openedBy } = req.body; // 👈 añadimos reason y openedBy
   const tx = transactions.get(id);
   if (!tx) return res.status(404).json({ error: 'No existe' });
 
@@ -87,18 +87,29 @@ app.post('/api/transactions/:id/action', (req, res) => {
       if (tx.status !== TX_STATUS.PENDING_DEPOSIT) return res.status(400).json({ error: 'Estado inválido' });
       tx.status = TX_STATUS.HELD;
       break;
+
     case 'start-delivery':
       if (tx.status !== TX_STATUS.HELD) return res.status(400).json({ error: 'Estado inválido' });
       tx.status = TX_STATUS.IN_DELIVERY;
       break;
+
     case 'release':
       if (tx.status !== TX_STATUS.IN_DELIVERY) return res.status(400).json({ error: 'Estado inválido' });
       tx.status = TX_STATUS.COMPLETED;
       break;
+
     case 'dispute':
-      if (tx.status === TX_STATUS.COMPLETED) return res.status(400).json({ error: 'Ya completada' });
+      if (tx.status === TX_STATUS.COMPLETED) {
+        return res.status(400).json({ error: 'Ya completada' });
+      }
       tx.status = TX_STATUS.DISPUTED;
+      tx.dispute = {
+        reason: reason || 'Sin motivo detallado',
+        openedBy: openedBy || 'unknown',
+        openedAt: new Date().toISOString(),
+      };
       break;
+
     default:
       return res.status(400).json({ error: 'Acción no válida' });
   }
@@ -106,6 +117,7 @@ app.post('/api/transactions/:id/action', (req, res) => {
   transactions.set(id, tx);
   res.json(tx);
 });
+
 // Login simple: por email o teléfono (MVP, sin contraseña)
 app.post('/api/login', (req, res) => {
   const { identifier } = req.body; // puede ser email o phone
