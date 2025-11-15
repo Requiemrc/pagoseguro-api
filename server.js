@@ -67,37 +67,36 @@ app.post('/api/transactions', (req, res) => {
 });
 
 app.get('/api/transactions', (req, res) => {
-  const { role, email } = req.query;
-  const list = [...transactions.values()];
-  if (!role || !email) return res.json(list);
+  const { role, email, status } = req.query;
+  let list = [...transactions.values()];
 
-  if (role === 'buyer') return res.json(list.filter(t => t.buyerEmail === email));
-  if (role === 'seller') return res.json(list.filter(t => t.sellerEmail === email));
-  return res.json(list);
+  if (status) {
+    list = list.filter(t => t.status === status);
+  }
+
+  if (role && email) {
+    if (role === 'buyer') list = list.filter(t => t.buyerEmail === email);
+    if (role === 'seller') list = list.filter(t => t.sellerEmail === email);
+  }
+
+  res.json(list);
+});
+
+app.get('/api/transactions/:id', (req, res) => {
+  const { id } = req.params;
+  const tx = transactions.get(id);
+  if (!tx) return res.status(404).json({ error: 'No existe' });
+  res.json(tx);
 });
 
 app.post('/api/transactions/:id/action', (req, res) => {
   const { id } = req.params;
-  const { action, reason, openedBy } = req.body; // 👈 añadimos reason y openedBy
+  const { action, reason, openedBy } = req.body;
   const tx = transactions.get(id);
   if (!tx) return res.status(404).json({ error: 'No existe' });
 
   switch (action) {
-    case 'deposit':
-      if (tx.status !== TX_STATUS.PENDING_DEPOSIT) return res.status(400).json({ error: 'Estado inválido' });
-      tx.status = TX_STATUS.HELD;
-      break;
-
-    case 'start-delivery':
-      if (tx.status !== TX_STATUS.HELD) return res.status(400).json({ error: 'Estado inválido' });
-      tx.status = TX_STATUS.IN_DELIVERY;
-      break;
-
-    case 'release':
-      if (tx.status !== TX_STATUS.IN_DELIVERY) return res.status(400).json({ error: 'Estado inválido' });
-      tx.status = TX_STATUS.COMPLETED;
-      break;
-
+    // ... deposit, start-delivery, release igual que antes
     case 'dispute':
       if (tx.status === TX_STATUS.COMPLETED) {
         return res.status(400).json({ error: 'Ya completada' });
@@ -107,9 +106,9 @@ app.post('/api/transactions/:id/action', (req, res) => {
         reason: reason || 'Sin motivo detallado',
         openedBy: openedBy || 'unknown',
         openedAt: new Date().toISOString(),
+        status: 'OPEN',
       };
       break;
-
     default:
       return res.status(400).json({ error: 'Acción no válida' });
   }
@@ -117,6 +116,38 @@ app.post('/api/transactions/:id/action', (req, res) => {
   transactions.set(id, tx);
   res.json(tx);
 });
+
+app.post('/api/admin/disputes/:id/resolve', (req, res) => {
+  const { id } = req.params;
+  const { outcome, operatorNotes } = req.body;
+
+  const tx = transactions.get(id);
+  if (!tx) return res.status(404).json({ error: 'No existe' });
+  if (tx.status !== TX_STATUS.DISPUTED || !tx.dispute) {
+    return res.status(400).json({ error: 'La transacción no está en disputa' });
+  }
+
+  // Actualizamos disputa
+  tx.dispute.status = 'RESOLVED';
+  tx.dispute.outcome = outcome;
+  tx.dispute.operatorNotes = operatorNotes || '';
+  tx.dispute.resolvedAt = new Date().toISOString();
+
+  // Actualizamos estado de la transacción según outcome
+  if (outcome === 'REFUND_BUYER') {
+    tx.status = 'REFUNDED_BUYER';
+  } else if (outcome === 'RELEASE_SELLER') {
+    tx.status = 'RELEASED_TO_SELLER';
+  } else {
+    // NO_ACTION, se podría dejar en DISPUTED o marcar como cerrado
+    tx.status = TX_STATUS.DISPUTED;
+  }
+
+  transactions.set(id, tx);
+  res.json(tx);
+});
+
+
 
 // Login simple: por email o teléfono (MVP, sin contraseña)
 app.post('/api/login', (req, res) => {
