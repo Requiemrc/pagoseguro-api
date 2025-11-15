@@ -96,26 +96,48 @@ app.post('/api/transactions/:id/action', (req, res) => {
   if (!tx) return res.status(404).json({ error: 'No existe' });
 
   switch (action) {
-    // ... deposit, start-delivery, release igual que antes
-    case 'dispute':
-      if (tx.status === TX_STATUS.COMPLETED) {
-        return res.status(400).json({ error: 'Ya completada' });
-      }
-      tx.status = TX_STATUS.DISPUTED;
-      tx.dispute = {
-        reason: reason || 'Sin motivo detallado',
-        openedBy: openedBy || 'unknown',
-        openedAt: new Date().toISOString(),
-        status: 'OPEN',
-      };
-      break;
-    default:
-      return res.status(400).json({ error: 'Acción no válida' });
-  }
+  case 'deposit':
+    // comprador paga → dinero retenido
+    tx.status = TX_STATUS.HELD;
+    break;
+
+  case 'start-delivery':
+    // vendedor empieza entrega
+    if (tx.status !== TX_STATUS.HELD) {
+      return res.status(400).json({ error: 'No se puede iniciar entrega en este estado' });
+    }
+    tx.status = TX_STATUS.IN_DELIVERY;
+    break;
+
+  case 'release':
+    // comprador confirma recepción → transacción completada
+    if (tx.status !== TX_STATUS.IN_DELIVERY) {
+      return res.status(400).json({ error: 'No se puede confirmar recepción todavía' });
+    }
+    tx.status = TX_STATUS.COMPLETED;
+    break;
+
+  case 'dispute':
+    if (tx.status === TX_STATUS.COMPLETED) {
+      return res.status(400).json({ error: 'La transacción ya está completada' });
+    }
+    tx.status = TX_STATUS.DISPUTED;
+    tx.dispute = {
+      reason: reason || 'Sin motivo detallado',
+      openedBy: openedBy || 'unknown',
+      openedAt: new Date().toISOString(),
+      status: 'OPEN',
+    };
+    break;
+
+  default:
+    return res.status(400).json({ error: 'Acción no válida' });
+}
 
   transactions.set(id, tx);
   res.json(tx);
 });
+
 
 app.post('/api/admin/disputes/:id/resolve', (req, res) => {
   const { id } = req.params;
